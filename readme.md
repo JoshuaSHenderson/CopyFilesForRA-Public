@@ -16,5 +16,3 @@ This file does the following:
 * disconnects the mapped Cloud drive 
 
 
-## To Do
-* Create Public branch with all privledged information removed
