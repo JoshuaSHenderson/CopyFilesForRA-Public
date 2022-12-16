@@ -1,0 +1,160 @@
+﻿#Define log files
+$logfileTest = "log.txt"
+$logfilelocation = ""
+$logfilesize = (Get-Item $logfilelocation$logfileTest).length/1MB
+if($logfilesize -gt 1){
+    $nn = 1
+    $newname = ("log.txt" +"."+ $nn)
+    while((Get-ChildItem $logfilelocation -filter $newname | select -expand name) -eq $newname){
+        $nn++
+        $newname = ($logfileTest +"."+ $nn)
+        }
+     rename-item -path $logfilelocation$logfileTest -newname $newname
+}
+
+$logfile = "" #log file location
+
+Function LogWrite
+{
+   Param ([string]$logstring)
+   $date= Get-Date -format "MM/dd/yyyy HH:mm:ss"
+   Add-content $Logfile -value ($date +" " + $logstring)
+}
+
+#function to send email and exit script
+function sendemail
+{
+    Param ([string]$body)
+    $sendto = ""
+    $SendFrom = ""
+    Send-MailMessage -from $sendfrom -to $sendto -Subject 'Failure' -Body $body -SmtpServer ''
+    write-error $body
+}
+
+
+logwrite "-------Script is starting-------"
+
+#define File Location. These do not have the file names or wild cards, just the folders!
+$ToDyanmics = ""
+$ToD365 = ""
+$Sent =" "
+$FromD365 = ""
+$Source = ""
+
+#connect to Azure Storage
+net use i: (CloudFileLocation) /u:(cloudfileUser) (Cloud File Key)
+sleep 10
+
+#check if i connected succesfully
+try{Get-ChildItem i:\ -erroraction stop}
+catch{ 
+    logwrite "Error: Not connected to I drive. exiting"
+    sendemail "Error: Not connected to I drive. exiting"
+    }
+
+
+# Move Files to D365
+
+#copy files to I
+logwrite "copying files from /ToDynamics to /ToD365"
+logwrite (xcopy /z /f /y $ToDyanmics*.zip $ToD365)
+if(($LASTEXITCODE -ne 1 ) -and ($LASTEXITCODE -ne 0)){
+        logwrite "Error: Could not copy Files to \ToD365. Exiting."
+        sendemail "Error: Could not copy Files to \ToD365"
+        $success1 = $false
+    }elseif($LASTEXITCODE -eq 1){
+        logwrite "Warning: No files were found to copy"
+         $success1 = $false
+    }else{
+        Logwrite "Copy to \ToD365 Successfull"
+        $success1 = $true
+}
+
+logwrite "copying from \toDynamics to \Sent"
+logwrite (xcopy /z /f /y $ToDyanmics*.zip $Sent )
+if(($LASTEXITCODE -ne 1 ) -and ($LASTEXITCODE -ne 0)){
+        logwrite "Error: Could not move files from \ToDynamics to \Sent. Exiting"
+        sendemail "Error: Could not move files from \ToDynamics to \Sent. Exiting"
+        $success2 = $false
+
+    }elseif($LASTEXITCODE -eq 1){
+        logwrite "Warning: No files were found to copy"
+        $success2 = $false
+
+    }else{
+        Logwrite "Copy to \Sent folder Successfull"
+        $success2 = $true
+}
+
+#get items in i
+$Checkd365 = Get-ChildItem $ToD365*.zip | Select Name
+$checkstring = $Checkd365 | out-string
+Logwrite "Current items in \ToD365 $($checkstring)"
+
+if(($success1 -eq $true) -and ($success2 -eq $true)){
+        Logwrite "Deleting files in \ToDynamics"
+        del $ToDyanmics*.zip
+        Logwrite "Files Deleted in \ToDynamics"
+    }else{
+    logwrite "ERROR: A copy failed. No files were deleted in the \ToDynamics"
+    }
+
+
+
+#copy files from  Azure Storage to \Source
+logwrite "Copying items from \D365\ to \Source\"
+
+#New code 20221115
+    # get items in $from D365 to find sizes
+$GetItems = (get-item -path $FromD365*.zip)     
+    #Get items length, if length is over 1KB, copy to $source folder
+            foreach($i in $getitems){ 
+                if ($i.length/1KB -gt 1){
+                logwrite(xcopy /z /y /f $i $Source)
+                }
+                Else{LogWrite("Skipping $($i)")}
+            }
+####
+
+#below is old code
+#logwrite (xcopy /z /y $FromD365*.zip $Source)
+
+#check exit code of the the last commands, may not actually work
+if(($LASTEXITCODE -ne 1 ) -and ($LASTEXITCODE -ne 0)){
+        logwrite "Error: Could not move files from \FromD365 to \Source"
+        Sendemail "Error: Could not move files from \FromD365 to \Source"
+        $Checkd3652 = Get-ChildItem $Source*.zip | Select Name
+        $checkstring = $Checkd3652 | out-string
+        Logwrite "Current items in \Source $($checkstring)"
+
+    }elseif($LASTEXITCODE -eq 1){
+        logwrite "Warning: No files were found to copy"
+        $Checkd3652 = Get-ChildItem $Source*.zip | Select Name
+        $checkstring2 = $Checkd3652 | out-string
+        Logwrite "Current items in \Source$($checkstring2)"
+
+    }else{
+        logwrite "Copy from \FromD365 to \Source Succesfull"
+
+        #get items in i
+        $Checkd3652 = Get-ChildItem $Source*.zip | Select Name
+        $checkstring2 = $Checkd3652 | out-string
+        Logwrite "Current items in \Source $($checkstring2)"
+
+        #Move files in "From D365" on to Archive, This is to be left until testing is finished 20221115
+        logwrite "Moving files from \FromD365 to script-archive Folder"  
+        Move-Item -path $FromD365*.zip -destination $FromD365"script-archived\"
+        logwrite "Files Moved \FromD365 to script-archive Folder"
+}
+
+#delete i drive
+try {net use i: /delete }
+Catch{
+    Logwrite "Error: Could not disconnect I: drive"
+    Sendemail "Error: Could not disconnect I: drive"}
+logwrite "I: drive removed"
+
+LogWrite "------Script is finished------
+
+
+"
